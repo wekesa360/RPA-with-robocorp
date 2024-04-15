@@ -1,74 +1,90 @@
 from robocorp.tasks import task
 from robocorp import browser
-
 from RPA.HTTP import HTTP
-from RPA.Excel.Files import Files
-from RPA.PDF import PDF
+from RPA.Tables import Tables
+from  RPA.PDF import PDF
+import shutil
+import os
+
 
 @task
-def robot_spare_bin_python():
-    """Insert the sales data for the week and export it as a PDF"""
+def order_robots_from_RobotSpareBin():
+    """
+    Orders robots from RobotSpareBin Industries Inc.
+    Saves the order HTML receipt as a PDF file.
+    Saves the screenshot of the ordered robot.
+    Embeds the screenshot of the robot to the PDF receipt.
+    Creates ZIP archive of the receipts and the images.
+    """
     browser.configure(
-        slowmo=100,
+        slowmo=100
     )
-    open_the_intranet_website()
-    log_in()
-    download_excel_file()
-    fill_form_with_excel_data()
-    collect_results()
-    export_as_pdf()
-    log_out()
-
-def open_the_intranet_website():
-    """Navigates to the given URL"""
-    browser.goto("https://robotsparebinindustries.com/")
-
-def log_in():
-    """Fills in the login form and clicks the 'Log in' button"""
-    page = browser.page()
-    page.fill("#username", "maria")
-    page.fill("#password", "thoushallnotpass")
-    page.click("button:text('Log in')")
-
-def fill_and_submit_sales_form(sales_rep):
-    """Fills in the sales data and click the 'Submit' button"""
-    page = browser.page()
-
-    page.fill("#firstname", sales_rep["First Name"])
-    page.fill("#lastname", sales_rep["Last Name"])
-    page.select_option("#salestarget", str(sales_rep["Sales Target"]))
-    page.fill("#salesresult", str(sales_rep["Sales"]))
-    page.click("text=Submit")
-
-def download_excel_file():
-    """Downloads excel file from the given URL"""
-    http = HTTP()
-    http.download(url="https://robotsparebinindustries.com/SalesData.xlsx", overwrite=True)
-
-def fill_form_with_excel_data():
-    """Read data from excel and fill in the sales form"""
-    excel = Files()
-    excel.open_workbook("SalesData.xlsx")
-    worksheet = excel.read_worksheet_as_table("data", header=True)
-    excel.close_workbook()
-
-    for row in worksheet:
-        fill_and_submit_sales_form(row)
-
-def collect_results():
-    """Take a screenshot of the page"""
-    page = browser.page()
-    page.screenshot(path="output/sales_summary.png")
-
-def export_as_pdf():
-    """Export the data to a pdf file"""
-    page = browser.page()
-    sales_results_html = page.locator("#sales-results").inner_html()
-
+    open_robot_order_website()
+    global path
+    global pdf
     pdf = PDF()
-    pdf.html_to_pdf(sales_results_html, "output/sales_results.pdf")
+    path = os.getcwd()
+    orders = get_orders()
+    for order in orders:
+        close_annoying_modal()
+        fill_the_form(order)
+        screenshot_robot(order["Order number"])
+        store_receipt_as_pdf(order["Order number"])
+        embed_screenshot_to_receipt(f'output/image/{order["Order number"]}.png', f'output/pdf/{order["Order number"]}.pdf')
+        page.click('#order-another')
+    archive_receipts()
 
-def log_out():
-    """Presses the 'Log out' button"""
+
+
+
+def open_robot_order_website():
+    browser.goto("https://robotsparebinindustries.com/#/robot-order")
+    global page
     page = browser.page()
-    page.click("text=Log out")
+
+
+
+def get_orders():
+    http = HTTP()
+    http.download("https://robotsparebinindustries.com/orders.csv", "orders.csv", overwrite=True)
+    tables = Tables()
+    orders = tables.read_table_from_csv(path=f'{path}/orders.csv', header=True, delimiters=',')
+    return orders
+
+
+def close_annoying_modal():
+    page = browser.page()
+    page.click("button:text('Yep')")
+
+
+
+def fill_the_form(row):
+    page.select_option('#head', str(row['Head']))
+    page.click(f'//*[@class="form-check-input" and @value="{row["Body"]}"]')
+    page.fill("//*[@placeholder='Enter the part number for the legs']", str(row['Legs']))
+    page.fill('//*[@placeholder="Shipping address"]', str(row['Address']))
+    page.click('text="Preview"')
+    page.click('//*[@id="order"]')
+    try:
+        page.query_selector('#receipt').inner_html()
+    except:
+        fill_the_form(row)
+
+def store_receipt_as_pdf(order_number):
+    receipt = page.locator('#receipt').inner_html()
+    pdf.html_to_pdf(receipt, f'output/pdf/{order_number}.pdf')
+
+def screenshot_robot(order_number):
+    locator = page.locator('#robot-preview-image')
+    locator.screenshot(path=f'output/image/{order_number}.png')
+
+
+def embed_screenshot_to_receipt(screenshot, pdf_file):
+    image = [f'{screenshot}:align=center']
+    pdf.add_files_to_pdf(image, pdf_file, append=True)
+
+def archive_receipts():
+    archive_dir = "output/pdf"
+    source_dir = "output/pdf"
+    shutil.make_archive(archive_dir, 'zip', source_dir)
+    
